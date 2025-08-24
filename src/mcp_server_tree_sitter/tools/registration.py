@@ -76,15 +76,15 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     # File Operations Tools
     @mcp_server.tool()
     def list_files(
-        pattern: Optional[str] = None,
-        max_depth: Optional[int] = None,
-        extensions: Optional[list[str]] = None,
+        pattern: str = "",
+        max_depth: int = -1,
+        extensions: list[str] = [],
     ) -> list[str]:
         """list files in the active project.
 
         Args:
             pattern: Optional glob pattern (e.g., "**/*.py")
-            max_depth: Maximum directory depth
+            max_depth: Maximum directory depth (-1 means default/no limit)
             extensions: list of file extensions to include (without dot)
 
         Returns:
@@ -92,15 +92,19 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         """
         from ..tools.file_operations import list_project_files
 
-        return list_project_files(_active_project(), pattern, max_depth, extensions)
+        pat = pattern or None
+        depth = None if max_depth < 0 else max_depth
+        exts = None if not extensions else extensions
+
+        return list_project_files(_active_project(), pat, depth, exts)
 
     @mcp_server.tool()
-    def get_file(path: str, max_lines: Optional[int] = None, start_line: int = 0) -> str:
+    def get_file(path: str, max_lines: int = -1, start_line: int = 0) -> str:
         """Get content of a file.
 
         Args:
             path: File path relative to project root
-            max_lines: Maximum number of lines to return
+            max_lines: Maximum number of lines to return (-1 means entire file)
             start_line: First line to include (0-based)
 
         Returns:
@@ -108,7 +112,8 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         """
         from ..tools.file_operations import get_file_content
 
-        return get_file_content(_active_project(), path, max_lines=max_lines, start_line=start_line)
+        ml = None if max_lines is None or max_lines < 0 else max_lines
+        return get_file_content(_active_project(), path, max_lines=ml, start_line=start_line)
 
     @mcp_server.tool()
     def get_file_metadata(path: str) -> dict[str, Any]:
@@ -126,12 +131,12 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
 
     # AST Analysis Tools
     @mcp_server.tool()
-    def get_ast(path: str, max_depth: Optional[int] = None, include_text: bool = True) -> dict[str, Any]:
+    def get_ast(path: str, max_depth: int = -1, include_text: bool = True) -> dict[str, Any]:
         """Get abstract syntax tree for a file.
 
         Args:
             path: File path relative to project root
-            max_depth: Maximum depth of the tree (default: 5)
+            max_depth: Maximum depth of the tree (-1 means use default)
             include_text: Whether to include node text
 
         Returns:
@@ -140,7 +145,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         from ..tools.ast_operations import get_file_ast
 
         config = config_manager.get_config()
-        depth = max_depth or config.language.default_max_depth
+        depth = max_depth if max_depth is not None and max_depth >= 0 else config.language.default_max_depth
 
         return get_file_ast(
             _active_project(),
@@ -187,7 +192,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     @mcp_server.tool()
     def find_text(
         pattern: str,
-        file_pattern: Optional[str] = None,
+        file_pattern: str = "",
         max_results: int = 100,
         case_sensitive: bool = False,
         whole_word: bool = False,
@@ -212,10 +217,11 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
 
         config = config_manager.get_config()
 
+        fp = file_pattern or None
         return search_text(
             _active_project(),
             pattern,
-            file_pattern,
+            fp,
             max_results if max_results is not None else config.max_results_default,
             case_sensitive,
             whole_word,
@@ -226,8 +232,8 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     @mcp_server.tool()
     def run_query(
         query: str,
-        file_path: Optional[str] = None,
-        language: Optional[str] = None,
+        file_path: str = "",
+        language: str = "",
         max_results: int = 100,
     ) -> list[dict[str, Any]]:
         """Run a tree-sitter query on project files.
@@ -245,13 +251,16 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
 
         config = config_manager.get_config()
 
+        fp = file_path or None
+        lang = language or None
+
         return query_code(
             _active_project(),
             query,
             language_registry,
             tree_cache,
-            file_path,
-            language,
+            fp,
+            lang,
             max_results if max_results is not None else config.max_results_default,
         )
 
@@ -279,7 +288,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         }
 
     @mcp_server.tool()
-    def list_query_templates_tool(language: Optional[str] = None) -> dict[str, Any]:
+    def list_query_templates_tool(language: str = "") -> dict[str, Any]:
         """list available query templates.
 
         Args:
@@ -290,7 +299,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         """
         from ..language.query_templates import list_query_templates
 
-        return list_query_templates(language)
+        return list_query_templates(language or None)
 
     @mcp_server.tool()
     def build_query(language: str, patterns: list[str], combine: str = "or") -> dict[str, str]:
@@ -350,7 +359,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
 
     # Analysis Tools
     @mcp_server.tool()
-    def get_symbols(file_path: str, symbol_types: Optional[list[str]] = None) -> dict[str, list[dict[str, Any]]]:
+    def get_symbols(file_path: str, symbol_types: list[str] = []) -> dict[str, list[dict[str, Any]]]:
         """Extract symbols from a file.
 
         Args:
@@ -362,22 +371,21 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
         """
         from ..tools.analysis import extract_symbols
 
-        return extract_symbols(_active_project(), file_path, language_registry, symbol_types)
+        return extract_symbols(_active_project(), file_path, language_registry, symbol_types or None)
 
     @mcp_server.tool()
-    def analyze_project(scan_depth: int = 3, ctx: Optional[Any] = None) -> dict[str, Any]:
+    def analyze_project(scan_depth: int = 3) -> dict[str, Any]:
         """Analyze overall project structure.
 
         Args:
             scan_depth: Depth of detailed analysis (higher is slower)
-            ctx: Optional MCP context for progress reporting
 
         Returns:
             Project analysis
         """
         from ..tools.analysis import analyze_project_structure
 
-        return analyze_project_structure(_active_project(), language_registry, scan_depth, ctx)
+        return analyze_project_structure(_active_project(), language_registry, scan_depth, None)
 
     @mcp_server.tool()
     def get_dependencies(file_path: str) -> dict[str, list[str]]:
@@ -418,7 +426,7 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     @mcp_server.tool()
     def find_similar_code(
         snippet: str,
-        language: Optional[str] = None,
+        language: str = "",
         threshold: float = 0.8,
         max_results: int = 10,
     ) -> list[dict[str, Any]]:
@@ -471,8 +479,8 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
     @mcp_server.tool()
     def find_usage(
         symbol: str,
-        file_path: Optional[str] = None,
-        language: Optional[str] = None,
+        file_path: str = "",
+        language: str = "",
     ) -> list[dict[str, Any]]:
         """Find usage of a symbol.
 
@@ -501,13 +509,16 @@ def register_tools(mcp_server: Any, container: DependencyContainer) -> None:
 
         from ..tools.search import query_code
 
+        fp = file_path or None
+        lang = language or None
+
         return query_code(
-            _active_project(), query, language_registry, tree_cache, file_path, language
+            _active_project(), query, language_registry, tree_cache, fp, lang
         )
 
     # Cache Management
     @mcp_server.tool()
-    def clear_cache(file_path: Optional[str] = None) -> dict[str, str]:
+    def clear_cache(file_path: str = "") -> dict[str, str]:
         """Clear the parse tree cache.
 
         Args:
