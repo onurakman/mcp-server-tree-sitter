@@ -40,25 +40,105 @@ class ServerContext:
         self.language_registry = language_registry or container.language_registry
         self.tree_cache = tree_cache or container.tree_cache
 
-    def get_config(self) -> ServerConfig:
-        """Get the current configuration."""
-        return self.config_manager.get_config()
+        # Track the name used for the active/global project
+        self._active_project_name: Optional[str] = None
 
-    # Project management methods
-    def register_project(
-        self, path: str, name: Optional[str] = None, description: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Register a project for code analysis."""
+
+        def get_config(self) -> ServerConfig:
+            """Get the current configuration."""
+            return self.config_manager.get_config()
+
+        # Project management methods
+        def register_project(
+            self, path: str, name: Optional[str] = None, description: Optional[str] = None
+        ) -> Dict[str, Any]:
+            """Register a project for code analysis."""
+            try:
+                # Register project
+                project = self.project_registry.register_project(name or path, path, description)
+
+                # Scan for languages
+                project.scan_files(self.language_registry)
+
+                return project.to_dict()
+            except Exception as e:
+                raise ProjectError(f"Failed to register project: {e}") from e
+
+        def set_active_project(self, path: str, description: Optional[str] = None) -> Dict[str, Any]:
+            """
+            Set the globally active project by path, register if needed, and index it.
+
+            The path string itself is used as the project name for uniqueness.
+            """
+            try:
+                name = path
+                # Try to get existing; otherwise register it
+                try:
+                    project = self.project_registry.get_project(name)
+                except Exception:
+                    project = self.project_registry.register_project(name, path, description)
+
+                # Always ensure indexing is up-to-date
+                project.scan_files(self.language_registry, force=True)
+
+                # Expose root globally via DI container for tools to consume without names
+                container = get_container()
+                container.register_dependency("project_root", str(project.root_path))
+
+                # Mark active
+                self._active_project_name = name
+                return project.to_dict()
+            except Exception as e:
+                raise ProjectError(f"Failed to set active project: {e}") from e
+
+        def get_active_project(self):
+            """Get the active/global Project object."""
+            if not self._active_project_name:
+                raise ProjectError("No active project is set. Please provide --project at startup.")
+            return self.project_registry.get_project(self._active_project_name)
+
+        def ensure_indexed(self, force: bool = False) -> Dict[str, int]:
+            """Ensure the active project's files are indexed (language scan)."""
+            project = self.get_active_project()
+            return project.scan_files(self.language_registry, force=force)
+
+    def set_active_project(self, path: str, description: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Set the globally active project by path, register if needed, and index it.
+
+        This also stores the project root globally in the DI container so tools can access it.
+        """
         try:
-            # Register project
-            project = self.project_registry.register_project(name or path, path, description)
+            DEFAULT_PROJECT_NAME = path
+            # Try to get existing default project; otherwise register it
+            try:
+                project = self.project_registry.get_project(DEFAULT_PROJECT_NAME)
+            except Exception:
+                project = self.project_registry.register_project(DEFAULT_PROJECT_NAME, path, description)
 
-            # Scan for languages
-            project.scan_files(self.language_registry)
+            # Always ensure indexing is up-to-date
+            project.scan_files(self.language_registry, force=True)
 
+            # Expose root globally via DI container for tools to consume without names
+            container = get_container()
+            container.register_dependency("project_root", str(project.root_path))
+
+            # Mark active
+            self._active_project_name = DEFAULT_PROJECT_NAME
             return project.to_dict()
         except Exception as e:
-            raise ProjectError(f"Failed to register project: {e}") from e
+            raise ProjectError(f"Failed to set active project: {e}") from e
+
+    def get_active_project(self):
+        """Get the active/global Project object."""
+        if not self._active_project_name:
+            raise ProjectError("No active project is set. Please provide --project at startup.")
+        return self.project_registry.get_project(self._active_project_name)
+
+    def ensure_indexed(self, force: bool = False) -> Dict[str, int]:
+        """Ensure the active project's files are indexed (language scan)."""
+        project = self.get_active_project()
+        return project.scan_files(self.language_registry, force=force)
 
     def list_projects(self) -> List[Dict[str, Any]]:
         """List all registered projects."""

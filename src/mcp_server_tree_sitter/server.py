@@ -111,6 +111,7 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--disable-cache", action="store_true", help="Disable parse tree caching")
     parser.add_argument("--version", action="store_true", help="Show version and exit")
+    parser.add_argument("--project", required=True, help="Path to the project root directory")
 
     # Parse arguments - this handles --help automatically
     args = parser.parse_args()
@@ -137,6 +138,11 @@ def main() -> None:
     # Get the container
     container = get_container()
 
+    # Ensure project path is provided (argparse required=True already validates this)
+    if not args.project:
+        logger.error("Project path is required. Use --project /path/to/project")
+        sys.exit(2)
+
     # Configure with provided options
     if args.config:
         logger.info(f"Loading configuration from {args.config}")
@@ -146,6 +152,23 @@ def main() -> None:
         logger.info("Disabling parse tree cache as requested")
         container.config_manager.update_value("cache.enabled", False)
         container.tree_cache.set_enabled(False)
+
+    # Initialize/register the default project and index it
+    DEFAULT_PROJECT_NAME = args.project
+    project_path = args.project
+    try:
+        try:
+            project = container.project_registry.get_project(DEFAULT_PROJECT_NAME)
+        except Exception:
+            project = container.project_registry.register_project(DEFAULT_PROJECT_NAME, project_path)
+        # Always index on startup so tools can run immediately
+        project.scan_files(container.language_registry, force=True)
+        # Expose globally for tools that consume the root directly
+        container.register_dependency("project_root", str(project.root_path))
+        logger.info(f"Active project initialized and indexed at: {project.root_path}")
+    except Exception as e:
+        logger.error(f"Failed to initialize project: {e}")
+        sys.exit(1)
 
     # Register capabilities and tools
     from .capabilities import register_capabilities

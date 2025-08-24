@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--disable-cache", action="store_true", help="Disable parse tree caching")
     parser.add_argument("--version", action="store_true", help="Show version and exit")
+    parser.add_argument("--project", required=True, help="Path to the project root directory")
 
     args = parser.parse_args()
 
@@ -43,6 +44,11 @@ def main() -> int:
         update_log_levels("DEBUG")
         logger.debug("Debug logging enabled")
 
+    # Ensure project path is provided (argparse required=True already enforces this)
+    if not args.project:
+        logger.error("Project path is required. Use --project /path/to/project")
+        return 2
+
     # Load configuration
     try:
         config = load_config(args.config)
@@ -60,6 +66,14 @@ def main() -> int:
         logger.debug("Configuration loaded successfully")
     except Exception as e:
         logger.error(f"Error loading configuration: {e}")
+        return 1
+
+    # Initialize active project and index it
+    try:
+        global_context.set_active_project(args.project)
+        logger.info(f"Active project set and indexed at: {args.project}")
+    except Exception as e:
+        logger.error(f"Failed to initialize project: {e}")
         return 1
 
     # Run the server
